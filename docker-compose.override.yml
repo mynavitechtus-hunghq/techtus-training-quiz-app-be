@@ -1,0 +1,11 @@
+services:
+  app:
+    build:
+      target: development-stage
+    command: pnpm start:dev
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+
+    volumes:
+      - .:/app
+      - /app/node_modules
