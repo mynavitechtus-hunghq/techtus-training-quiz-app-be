@@ -8,7 +8,7 @@ import { User } from '@/entities/User';
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        type: config.get<any>('DB_TYPE'),
+        type: config.get<'postgres'>('DB_TYPE'),
         host: config.get<string>('DB_HOST'),
         port: config.get<number>('DB_PORT'),
         username: config.get<string>('DB_USERNAME'),
