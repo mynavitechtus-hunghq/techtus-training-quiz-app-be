@@ -7,9 +7,13 @@ export function setupCors(app: INestApplication) {
   const allowedOrigins = rawOrigins?.split(',') ?? [];
 
   app.enableCors({
-    origin: (requestOrigin, callback) => {
+    origin: (
+      requestOrigin: string,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) => {
       if (!requestOrigin) {
-        return callback(null, true);
+        callback(null, true);
+        return;
       }
 
       if (allowedOrigins.includes(requestOrigin)) {
