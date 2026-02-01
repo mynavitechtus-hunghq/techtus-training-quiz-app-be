@@ -1,12 +1,19 @@
-import { Controller, Get } from '@nestjs/common';
-import { AppService } from './app.service';
+import { Controller, Get, Redirect } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { ENVIRONMENT, ENV_KEYS } from '@/common/constants/environment.constant';
 
 @Controller()
 export class AppController {
-  constructor(private readonly appService: AppService) {}
+  constructor(private readonly configService: ConfigService) {}
 
   @Get()
-  getHello(): string {
-    return this.appService.getHello();
+  @Redirect('/api/docs', 302)
+  redirect() {
+    // Only redirect in development mode
+    const nodeEnv = this.configService.get<string>(ENV_KEYS.NODE_ENV);
+    if (nodeEnv === ENVIRONMENT.DEVELOPMENT || !nodeEnv) {
+      return { url: '/api/docs' };
+    }
+    return { url: '/api/docs' };
   }
 }

@@ -1,6 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { ENVIRONMENT, ENV_KEYS } from '@/common/constants/environment.constant';
 
 export function setupSwagger(app: INestApplication) {
   if (!isShowSwagger(app)) return;
@@ -23,5 +24,7 @@ export function setupSwagger(app: INestApplication) {
 
 function isShowSwagger(app: INestApplication) {
   const configService = app.get(ConfigService);
-  return configService.get<string>('NODE_ENV') === 'development';
+  return (
+    configService.get<string>(ENV_KEYS.NODE_ENV) === ENVIRONMENT.DEVELOPMENT
+  );
 }
