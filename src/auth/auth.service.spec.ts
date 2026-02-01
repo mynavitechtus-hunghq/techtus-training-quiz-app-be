@@ -1,8 +1,10 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
-import { v4 as uuidv4 } from 'uuid';
 
 jest.mock('bcrypt');
 jest.mock('uuid', () => ({ v4: jest.fn(() => 'mock-uuid-123') }));
@@ -203,8 +205,10 @@ describe('AuthService', () => {
       });
 
       it('should return accessToken and refreshToken when credentials are valid', async () => {
-        const result: SignInResponseDto =
-          await service.signIn(validSignInDto, mockRequest);
+        const result: SignInResponseDto = await service.signIn(
+          validSignInDto,
+          mockRequest,
+        );
 
         expect(result).toEqual({
           accessToken: 'mock-jwt-token',
@@ -257,7 +261,7 @@ describe('AuthService', () => {
             sub: mockUserWithPassword.id,
             email: mockUserWithPassword.email,
           },
-          { expiresIn: '15m' },
+          { expiresIn: 900 }, // 15m = 900 seconds
         );
       });
 
@@ -271,7 +275,7 @@ describe('AuthService', () => {
             email: mockUserWithPassword.email,
             sid: expect.any(String),
           }),
-          { expiresIn: '7d' },
+          { expiresIn: 604800 }, // 7d = 604800 seconds
         );
       });
 
@@ -340,8 +344,7 @@ describe('AuthService', () => {
 
         const iPhoneRequest = {
           ip: '127.0.0.1',
-          userAgent:
-            'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X)',
+          userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X)',
         };
 
         await service.signIn(validSignInDto, iPhoneRequest);
@@ -414,6 +417,344 @@ describe('AuthService', () => {
             userAgent: undefined,
           }),
         );
+      });
+    });
+  });
+
+  describe('refreshToken', () => {
+    const validRefreshToken = 'valid.jwt.token';
+    const expiredRefreshToken = 'expired.jwt.token';
+    const invalidRefreshToken = 'invalid.jwt.token';
+
+    const mockDecodedToken = {
+      sub: 'user-id-123',
+      email: 'test@example.com',
+      sid: 'session-id-123',
+    };
+
+    const mockSession = {
+      id: 'session-id-123',
+      userId: 'user-id-123',
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      lastActivityAt: new Date(Date.now() - 1000),
+      isRevoked: false,
+      ipAddress: '127.0.0.1',
+      deviceName: 'Mac',
+    };
+
+    const mockRequest = {
+      ip: '192.168.1.1',
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
+    };
+
+    describe('successful token refresh', () => {
+      beforeEach(() => {
+        mockJwtService.verify.mockReturnValue(mockDecodedToken);
+        mockSessionRepository.findOne.mockResolvedValue(mockSession);
+        mockSessionRepository.save.mockResolvedValue(mockSession);
+        mockJwtService.sign
+          .mockReturnValueOnce('new-access-token')
+          .mockReturnValueOnce('new-refresh-token');
+      });
+
+      it('should verify refresh token with jwtService.verify', async () => {
+        await service.refreshToken(validRefreshToken, mockRequest);
+
+        expect(mockJwtService.verify).toHaveBeenCalledWith(validRefreshToken);
+      });
+
+      it('should query session by sessionId from token', async () => {
+        await service.refreshToken(validRefreshToken, mockRequest);
+
+        expect(mockSessionRepository.findOne).toHaveBeenCalledWith({
+          where: { id: mockDecodedToken.sid },
+        });
+      });
+
+      it('should return new accessToken and refreshToken', async () => {
+        const result = await service.refreshToken(
+          validRefreshToken,
+          mockRequest,
+        );
+
+        expect(result).toEqual({
+          accessToken: 'new-access-token',
+          refreshToken: 'new-refresh-token',
+        });
+        expect(result).toHaveProperty('accessToken');
+        expect(result).toHaveProperty('refreshToken');
+      });
+
+      it('should update session.lastActivityAt', async () => {
+        const originalLastActivity = new Date(mockSession.lastActivityAt);
+
+        await service.refreshToken(validRefreshToken, mockRequest);
+
+        expect(mockSessionRepository.save).toHaveBeenCalledWith(
+          expect.objectContaining({
+            lastActivityAt: expect.any(Date),
+          }),
+        );
+
+        const savedSession = mockSessionRepository.save.mock.calls[0][0];
+        expect(savedSession.lastActivityAt.getTime()).toBeGreaterThanOrEqual(
+          originalLastActivity.getTime(),
+        );
+      });
+
+      it('should save updated session to database', async () => {
+        await service.refreshToken(validRefreshToken, mockRequest);
+
+        expect(mockSessionRepository.save).toHaveBeenCalled();
+        expect(mockSessionRepository.save).toHaveBeenCalledWith(
+          expect.objectContaining({
+            id: mockSession.id,
+          }),
+        );
+      });
+
+      it('should generate new tokens with correct payload', async () => {
+        await service.refreshToken(validRefreshToken, mockRequest);
+
+        expect(mockJwtService.sign).toHaveBeenCalledTimes(2);
+        expect(mockJwtService.sign).toHaveBeenNthCalledWith(
+          1,
+          { sub: mockDecodedToken.sub, email: mockDecodedToken.email },
+          { expiresIn: expect.any(Number) },
+        );
+      });
+
+      it('should include sessionId in new refresh token', async () => {
+        await service.refreshToken(validRefreshToken, mockRequest);
+
+        expect(mockJwtService.sign).toHaveBeenNthCalledWith(
+          2,
+          {
+            sub: mockDecodedToken.sub,
+            email: mockDecodedToken.email,
+            sid: mockDecodedToken.sid,
+          },
+          { expiresIn: expect.any(Number) },
+        );
+      });
+
+      it('should update ipAddress if provided', async () => {
+        await service.refreshToken(validRefreshToken, mockRequest);
+
+        expect(mockSessionRepository.save).toHaveBeenCalledWith(
+          expect.objectContaining({
+            ipAddress: mockRequest.ip,
+          }),
+        );
+      });
+
+      it('should update deviceName if device changed', async () => {
+        await service.refreshToken(validRefreshToken, mockRequest);
+
+        expect(mockSessionRepository.save).toHaveBeenCalledWith(
+          expect.objectContaining({
+            deviceName: 'Mac',
+          }),
+        );
+      });
+    });
+
+    describe('token validation errors', () => {
+      it('should throw AUTH-008 when token is expired', async () => {
+        mockJwtService.verify.mockImplementation(() => {
+          const error: any = new Error('jwt expired');
+          error.name = 'TokenExpiredError';
+          throw error;
+        });
+
+        await expectExceptionWithCode(
+          service.refreshToken(expiredRefreshToken, mockRequest),
+          UnauthorizedException,
+          AUTH_ERROR_CODES.INVALID_REFRESH_TOKEN,
+        );
+      });
+
+      it('should throw AUTH-008 when token signature is invalid', async () => {
+        mockJwtService.verify.mockImplementation(() => {
+          const error: any = new Error('invalid signature');
+          error.name = 'JsonWebTokenError';
+          throw error;
+        });
+
+        await expectExceptionWithCode(
+          service.refreshToken(invalidRefreshToken, mockRequest),
+          UnauthorizedException,
+          AUTH_ERROR_CODES.INVALID_REFRESH_TOKEN,
+        );
+      });
+
+      it('should throw AUTH-008 when token is malformed', async () => {
+        mockJwtService.verify.mockImplementation(() => {
+          const error: any = new Error('jwt malformed');
+          error.name = 'JsonWebTokenError';
+          throw error;
+        });
+
+        await expectExceptionWithCode(
+          service.refreshToken('malformed.token', mockRequest),
+          UnauthorizedException,
+          AUTH_ERROR_CODES.INVALID_REFRESH_TOKEN,
+        );
+      });
+
+      it('should throw AUTH-008 when token has no sid claim', async () => {
+        mockJwtService.verify.mockReturnValue({
+          sub: 'user-id-123',
+          email: 'test@example.com',
+          // Missing sid
+        });
+
+        await expectExceptionWithCode(
+          service.refreshToken(validRefreshToken, mockRequest),
+          UnauthorizedException,
+          AUTH_ERROR_CODES.INVALID_REFRESH_TOKEN,
+        );
+      });
+    });
+
+    describe('session validation errors', () => {
+      beforeEach(() => {
+        mockJwtService.verify.mockReturnValue(mockDecodedToken);
+      });
+
+      it('should throw AUTH-005 when session not found', async () => {
+        mockSessionRepository.findOne.mockResolvedValue(null);
+
+        await expectExceptionWithCode(
+          service.refreshToken(validRefreshToken, mockRequest),
+          UnauthorizedException,
+          AUTH_ERROR_CODES.SESSION_NOT_FOUND,
+        );
+      });
+
+      it('should throw AUTH-006 when session is revoked', async () => {
+        mockSessionRepository.findOne.mockResolvedValue({
+          ...mockSession,
+          isRevoked: true,
+        });
+
+        await expectExceptionWithCode(
+          service.refreshToken(validRefreshToken, mockRequest),
+          UnauthorizedException,
+          AUTH_ERROR_CODES.SESSION_REVOKED,
+        );
+      });
+
+      it('should throw AUTH-007 when session is expired', async () => {
+        mockSessionRepository.findOne.mockResolvedValue({
+          ...mockSession,
+          expiresAt: new Date(Date.now() - 1000), // Past date
+        });
+
+        await expectExceptionWithCode(
+          service.refreshToken(validRefreshToken, mockRequest),
+          UnauthorizedException,
+          AUTH_ERROR_CODES.SESSION_EXPIRED,
+        );
+      });
+    });
+
+    describe('session activity tracking', () => {
+      beforeEach(() => {
+        mockJwtService.verify.mockReturnValue(mockDecodedToken);
+        mockSessionRepository.findOne.mockResolvedValue(mockSession);
+        mockSessionRepository.save.mockResolvedValue(mockSession);
+        mockJwtService.sign
+          .mockReturnValueOnce('new-access-token')
+          .mockReturnValueOnce('new-refresh-token');
+      });
+
+      it('should update lastActivityAt to current time', async () => {
+        const beforeCall = Date.now();
+        await service.refreshToken(validRefreshToken, mockRequest);
+        const afterCall = Date.now();
+
+        const savedSession = mockSessionRepository.save.mock.calls[0][0];
+        const lastActivityTime = savedSession.lastActivityAt.getTime();
+
+        expect(lastActivityTime).toBeGreaterThanOrEqual(beforeCall);
+        expect(lastActivityTime).toBeLessThanOrEqual(afterCall);
+      });
+
+      it('should update ipAddress if provided', async () => {
+        await service.refreshToken(validRefreshToken, {
+          ip: '10.0.0.1',
+          userAgent: mockRequest.userAgent,
+        });
+
+        expect(mockSessionRepository.save).toHaveBeenCalledWith(
+          expect.objectContaining({
+            ipAddress: '10.0.0.1',
+          }),
+        );
+      });
+
+      it('should update deviceName if device changed', async () => {
+        await service.refreshToken(validRefreshToken, {
+          ip: mockRequest.ip,
+          userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X)',
+        });
+
+        expect(mockSessionRepository.save).toHaveBeenCalledWith(
+          expect.objectContaining({
+            deviceName: 'iPhone',
+          }),
+        );
+      });
+
+      it('should not update expiresAt (session lifetime unchanged)', async () => {
+        const originalExpiresAt = mockSession.expiresAt;
+        await service.refreshToken(validRefreshToken, mockRequest);
+
+        const savedSession = mockSessionRepository.save.mock.calls[0][0];
+        expect(savedSession.expiresAt).toEqual(originalExpiresAt);
+      });
+    });
+
+    describe('edge cases', () => {
+      beforeEach(() => {
+        mockJwtService.verify.mockReturnValue(mockDecodedToken);
+        mockSessionRepository.findOne.mockResolvedValue(mockSession);
+        mockSessionRepository.save.mockResolvedValue(mockSession);
+        mockJwtService.sign
+          .mockReturnValueOnce('new-access-token')
+          .mockReturnValueOnce('new-refresh-token');
+      });
+
+      it('should handle missing request context gracefully', async () => {
+        await service.refreshToken(validRefreshToken);
+
+        expect(mockSessionRepository.save).toHaveBeenCalled();
+        const savedSession = mockSessionRepository.save.mock.calls[0][0];
+        expect(savedSession).toBeDefined();
+      });
+
+      it('should generate different tokens on each call', async () => {
+        mockJwtService.sign
+          .mockReturnValueOnce('access-token-1')
+          .mockReturnValueOnce('refresh-token-1');
+
+        const result1 = await service.refreshToken(
+          validRefreshToken,
+          mockRequest,
+        );
+
+        mockJwtService.sign
+          .mockReturnValueOnce('access-token-2')
+          .mockReturnValueOnce('refresh-token-2');
+
+        const result2 = await service.refreshToken(
+          validRefreshToken,
+          mockRequest,
+        );
+
+        expect(result1.accessToken).not.toBe(result2.accessToken);
+        expect(result1.refreshToken).not.toBe(result2.refreshToken);
       });
     });
   });
