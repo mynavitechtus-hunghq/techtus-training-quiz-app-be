@@ -22,6 +22,7 @@ import {
   TOKEN_CONFIG,
   REFRESH_TOKEN_EXPIRY_DAYS,
 } from '@/common/constants/auth.constant';
+import { convertExpiry } from '@/common/helper/jwt.helper';
 
 @Injectable()
 export class AuthService {
@@ -73,7 +74,8 @@ export class AuthService {
     });
 
     const passwordToCompare =
-      user?.password || '$2b$10$dummyHashToPreventTimingAttackXXXXXXXXXXXXXXXXXXXXXXXXXXXXX';
+      user?.password ||
+      '$2b$10$dummyHashToPreventTimingAttackXXXXXXXXXXXXXXXXXXXXXXXXXXXXX';
     const isPasswordValid = await bcrypt.compare(password, passwordToCompare);
 
     if (!user || !isPasswordValid) {
@@ -101,7 +103,7 @@ export class AuthService {
 
     const accessToken = this.jwtService.sign(
       { sub: user.id, email: user.email },
-      { expiresIn: TOKEN_CONFIG.ACCESS_TOKEN_EXPIRY },
+      { expiresIn: convertExpiry(TOKEN_CONFIG.ACCESS_TOKEN_EXPIRY) },
     );
 
     const refreshToken = this.jwtService.sign(
@@ -110,7 +112,7 @@ export class AuthService {
         email: user.email,
         sid: sessionId,
       },
-      { expiresIn: TOKEN_CONFIG.REFRESH_TOKEN_EXPIRY },
+      { expiresIn: convertExpiry(TOKEN_CONFIG.REFRESH_TOKEN_EXPIRY) },
     );
 
     return { accessToken, refreshToken };

@@ -43,7 +43,6 @@ const getPublicKey = (): string => {
       publicKey: getPublicKey(),
       signOptions: {
         algorithm: 'RS256',
-        expiresIn: convertExpiry(process.env.JWT_ACCESS_EXPIRES_IN || '15m'),
       },
     }),
   ],
