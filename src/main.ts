@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
+import { ValidationPipe } from '@nestjs/common';
 
 import { AppModule } from '@/app.module';
 import { setupSwagger } from '@core/swagger/swagger.setup';
@@ -11,6 +12,13 @@ async function bootstrap() {
   const port = configService.get<number>('PORT', 3000);
 
   app.setGlobalPrefix('/api');
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  );
   setupHelmet(app);
   setupSwagger(app);
 
