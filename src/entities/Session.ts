@@ -29,4 +29,3 @@ export class Session extends Base {
   @Column({ type: 'boolean', default: false })
   isRevoked: boolean;
 }
-

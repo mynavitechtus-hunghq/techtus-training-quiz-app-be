@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   BadRequestException,
@@ -11,8 +12,10 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { SignUpDto } from './dto/sign-up.dto';
 import { SignInDto } from './dto/sign-in.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { SignUpResponseDto } from './dto/sign-up-response.dto';
 import { SignInResponseDto } from './dto/sign-in-response.dto';
+import { RefreshTokenResponseDto } from './dto/refresh-token-response.dto';
 import { AUTH_ERROR_CODES } from '@/common/constants/error-codes.constant';
 import { expectExceptionWithCode } from '@test/helpers/exception.helper';
 import {
@@ -23,6 +26,7 @@ import {
 const mockAuthService = {
   signUp: jest.fn(),
   signIn: jest.fn(),
+  refreshToken: jest.fn(),
 };
 
 const validSignUpDto: SignUpDto = {
@@ -282,8 +286,7 @@ describe('auth.controller', () => {
 
         expect(mockAuthService.signIn).toHaveBeenCalledWith(validSignInDto, {
           ip: '127.0.0.1',
-          userAgent:
-            'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)',
+          userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)',
         });
         expect(result).toEqual(mockSignInResponse);
         expect(result).toHaveProperty('accessToken');
@@ -309,8 +312,7 @@ describe('auth.controller', () => {
         expect(mockAuthService.signIn).toHaveBeenCalledWith(
           validSignInDto,
           expect.objectContaining({
-            userAgent:
-              'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)',
+            userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)',
           }),
         );
       });
@@ -477,6 +479,260 @@ describe('auth.controller', () => {
             metatype: SignInDto,
           }),
         ).rejects.toThrow();
+      });
+    });
+  });
+
+  describe('POST /auth/refresh-token', () => {
+    const validRefreshTokenDto: RefreshTokenDto = {
+      refreshToken:
+        'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiYWRtaW4iOnRydWUsImlhdCI6MTUxNjIzOTAyMn0.POstGetfAytaZS82wHcjoTyoqhMyxXiWdR7Nn7A29DNSl0EiXLdwJ6xC6AfgZWF1bOsS_TuYI3OG85AmiExREkrS6tDfTQ2B3WXlrr-wp5AokiRbz3_oB4OxG-W9KcEEbDRcZc0nH3L7LzYptiy1PtAylQGxHTWZXtGz4ht0bAecBgmpdgXMguEIcoqPJ1n3pIWk_dUZegpqx0Lka21H6XxUTxiy8OcaarA8zdnPUnV6AmNP3ecFawIFYdvJB_cm-GvpCSbr8G8y_Mllj8f4x9nBH8pQux89_6gUY618iYv7tuPWBFfEbLxtF2pZS6YC1aSfLQxeNe8djT9YjpvRZA',
+    };
+
+    const mockRefreshResponse: RefreshTokenResponseDto = {
+      accessToken: 'new-access-token',
+      refreshToken: 'new-refresh-token',
+    };
+
+    describe('when successful', () => {
+      it('should return 200 with new tokens', async () => {
+        mockAuthService.refreshToken.mockResolvedValue(mockRefreshResponse);
+
+        const result = await controller.refreshToken(
+          validRefreshTokenDto,
+          mockRequest,
+        );
+
+        expect(result).toEqual(mockRefreshResponse);
+        expect(result).toHaveProperty('accessToken');
+        expect(result).toHaveProperty('refreshToken');
+      });
+
+      it('should call authService.refreshToken with correct params', async () => {
+        mockAuthService.refreshToken.mockResolvedValue(mockRefreshResponse);
+
+        await controller.refreshToken(validRefreshTokenDto, mockRequest);
+
+        expect(mockAuthService.refreshToken).toHaveBeenCalledWith(
+          validRefreshTokenDto.refreshToken,
+          {
+            ip: '127.0.0.1',
+            userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)',
+          },
+        );
+      });
+
+      it('should pass client IP to service', async () => {
+        mockAuthService.refreshToken.mockResolvedValue(mockRefreshResponse);
+
+        await controller.refreshToken(validRefreshTokenDto, mockRequest);
+
+        expect(mockAuthService.refreshToken).toHaveBeenCalledWith(
+          validRefreshTokenDto.refreshToken,
+          expect.objectContaining({ ip: '127.0.0.1' }),
+        );
+      });
+
+      it('should pass user-agent to service', async () => {
+        mockAuthService.refreshToken.mockResolvedValue(mockRefreshResponse);
+
+        await controller.refreshToken(validRefreshTokenDto, mockRequest);
+
+        expect(mockAuthService.refreshToken).toHaveBeenCalledWith(
+          validRefreshTokenDto.refreshToken,
+          expect.objectContaining({
+            userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)',
+          }),
+        );
+      });
+
+      it('should return tokens matching expected structure', async () => {
+        mockAuthService.refreshToken.mockResolvedValue(mockRefreshResponse);
+
+        const result = await controller.refreshToken(
+          validRefreshTokenDto,
+          mockRequest,
+        );
+
+        expect(typeof result.accessToken).toBe('string');
+        expect(typeof result.refreshToken).toBe('string');
+        expect(Object.keys(result).sort()).toEqual(
+          ['accessToken', 'refreshToken'].sort(),
+        );
+      });
+    });
+
+    describe('validation errors', () => {
+      it('should return 400 when refreshToken is missing', async () => {
+        const dto = {} as RefreshTokenDto;
+
+        await expect(
+          validationPipe.transform(dto, {
+            type: 'body',
+            metatype: RefreshTokenDto,
+          }),
+        ).rejects.toThrow();
+      });
+
+      it('should return 400 when refreshToken is empty', async () => {
+        const dto: RefreshTokenDto = {
+          refreshToken: '',
+        };
+
+        await expect(
+          validationPipe.transform(dto, {
+            type: 'body',
+            metatype: RefreshTokenDto,
+          }),
+        ).rejects.toThrow();
+      });
+
+      it('should return 400 when refreshToken is not a string', async () => {
+        const dto = {
+          refreshToken: 123456,
+        } as any;
+
+        await expect(
+          validationPipe.transform(dto, {
+            type: 'body',
+            metatype: RefreshTokenDto,
+          }),
+        ).rejects.toThrow();
+      });
+
+      it('should return 400 when refreshToken is not valid JWT', async () => {
+        const dto: RefreshTokenDto = {
+          refreshToken: 'not.a.valid.jwt',
+        };
+
+        await expect(
+          validationPipe.transform(dto, {
+            type: 'body',
+            metatype: RefreshTokenDto,
+          }),
+        ).rejects.toThrow();
+      });
+    });
+
+    describe('authentication errors', () => {
+      it('should return 401 with AUTH-008 when token is invalid', async () => {
+        mockAuthService.refreshToken.mockRejectedValue(
+          new UnauthorizedException({
+            errorCode: AUTH_ERROR_CODES.INVALID_REFRESH_TOKEN,
+          }),
+        );
+
+        await expectExceptionWithCode(
+          controller.refreshToken(validRefreshTokenDto, mockRequest),
+          UnauthorizedException,
+          AUTH_ERROR_CODES.INVALID_REFRESH_TOKEN,
+        );
+      });
+
+      it('should return 401 with AUTH-005 when session not found', async () => {
+        mockAuthService.refreshToken.mockRejectedValue(
+          new UnauthorizedException({
+            errorCode: AUTH_ERROR_CODES.SESSION_NOT_FOUND,
+          }),
+        );
+
+        await expectExceptionWithCode(
+          controller.refreshToken(validRefreshTokenDto, mockRequest),
+          UnauthorizedException,
+          AUTH_ERROR_CODES.SESSION_NOT_FOUND,
+        );
+      });
+
+      it('should return 401 with AUTH-006 when session is revoked', async () => {
+        mockAuthService.refreshToken.mockRejectedValue(
+          new UnauthorizedException({
+            errorCode: AUTH_ERROR_CODES.SESSION_REVOKED,
+          }),
+        );
+
+        await expectExceptionWithCode(
+          controller.refreshToken(validRefreshTokenDto, mockRequest),
+          UnauthorizedException,
+          AUTH_ERROR_CODES.SESSION_REVOKED,
+        );
+      });
+
+      it('should return 401 with AUTH-007 when session is expired', async () => {
+        mockAuthService.refreshToken.mockRejectedValue(
+          new UnauthorizedException({
+            errorCode: AUTH_ERROR_CODES.SESSION_EXPIRED,
+          }),
+        );
+
+        await expectExceptionWithCode(
+          controller.refreshToken(validRefreshTokenDto, mockRequest),
+          UnauthorizedException,
+          AUTH_ERROR_CODES.SESSION_EXPIRED,
+        );
+      });
+    });
+
+    describe('request context handling', () => {
+      it('should extract IP from x-forwarded-for header', async () => {
+        mockAuthService.refreshToken.mockResolvedValue(mockRefreshResponse);
+
+        const requestWithForwardedIp = {
+          ...mockRequest,
+          headers: {
+            ...mockRequest.headers,
+            'x-forwarded-for': '203.0.113.5, 198.51.100.1',
+          },
+        } as unknown as Request;
+
+        await controller.refreshToken(
+          validRefreshTokenDto,
+          requestWithForwardedIp,
+        );
+
+        expect(mockAuthService.refreshToken).toHaveBeenCalledWith(
+          validRefreshTokenDto.refreshToken,
+          expect.objectContaining({
+            ip: '203.0.113.5',
+          }),
+        );
+      });
+
+      it('should normalize IPv6 localhost to 127.0.0.1', async () => {
+        mockAuthService.refreshToken.mockResolvedValue(mockRefreshResponse);
+
+        const requestWithIPv6 = {
+          ...mockRequest,
+          ip: '::1',
+        } as unknown as Request;
+
+        await controller.refreshToken(validRefreshTokenDto, requestWithIPv6);
+
+        expect(mockAuthService.refreshToken).toHaveBeenCalledWith(
+          validRefreshTokenDto.refreshToken,
+          expect.objectContaining({
+            ip: '127.0.0.1',
+          }),
+        );
+      });
+
+      it('should extract user-agent from headers', async () => {
+        mockAuthService.refreshToken.mockResolvedValue(mockRefreshResponse);
+
+        const customRequest = {
+          ...mockRequest,
+          headers: {
+            'user-agent': 'Custom User Agent/1.0',
+          },
+        } as unknown as Request;
+
+        await controller.refreshToken(validRefreshTokenDto, customRequest);
+
+        expect(mockAuthService.refreshToken).toHaveBeenCalledWith(
+          validRefreshTokenDto.refreshToken,
+          expect.objectContaining({
+            userAgent: 'Custom User Agent/1.0',
+          }),
+        );
       });
     });
   });

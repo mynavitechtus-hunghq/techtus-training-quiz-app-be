@@ -14,6 +14,7 @@ import { SignUpDto } from './dto/sign-up.dto';
 import { SignInDto } from './dto/sign-in.dto';
 import { SignUpResponseDto } from './dto/sign-up-response.dto';
 import { SignInResponseDto } from './dto/sign-in-response.dto';
+import { RefreshTokenResponseDto } from './dto/refresh-token-response.dto';
 import { User } from '@/entities/User';
 import { Session } from '@/entities/Session';
 import { SALT_ROUNDS } from '@/common/constants/bcrypt.constant';
@@ -57,7 +58,8 @@ export class AuthService {
     });
 
     const savedUser = await this.userRepository.save(newUser);
-    const { password: _, ...userWithoutPassword } = savedUser;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { password: _password, ...userWithoutPassword } = savedUser;
 
     return userWithoutPassword;
   }
@@ -116,6 +118,96 @@ export class AuthService {
     );
 
     return { accessToken, refreshToken };
+  }
+
+  /**
+   * Refreshes access and refresh tokens using a valid refresh token.
+   * Validates the refresh token, checks session status, and generates new tokens.
+   * @param refreshToken - The refresh token to validate
+   * @param request - Optional request context containing IP and user agent
+   * @returns New access and refresh token pair
+   * @throws UnauthorizedException if token or session is invalid
+   */
+  async refreshToken(
+    refreshToken: string,
+    request?: { ip?: string; userAgent?: string },
+  ): Promise<RefreshTokenResponseDto> {
+    // 1. Verify and decode refresh token
+    let payload: { sub: string; email: string; sid: string };
+    try {
+      payload = this.jwtService.verify(refreshToken);
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    } catch (error) {
+      throw new UnauthorizedException({
+        errorCode: AUTH_ERROR_CODES.INVALID_REFRESH_TOKEN,
+        message: 'Invalid or expired refresh token',
+      });
+    }
+
+    // 2. Extract and validate session ID
+    const sessionId: string = payload.sid;
+    if (!sessionId) {
+      throw new UnauthorizedException({
+        errorCode: AUTH_ERROR_CODES.INVALID_REFRESH_TOKEN,
+        message: 'Refresh token missing session ID',
+      });
+    }
+
+    // 3. Find and validate session
+    const session: {
+      id: string;
+      isRevoked: boolean;
+      expiresAt: Date;
+      lastActivityAt: Date;
+      ipAddress?: string;
+      deviceName?: string;
+    } | null = await this.sessionRepository.findOne({
+      where: { id: sessionId },
+    });
+
+    if (!session) {
+      throw new UnauthorizedException({
+        errorCode: AUTH_ERROR_CODES.SESSION_NOT_FOUND,
+        message: 'Session not found',
+      });
+    }
+
+    if (session.isRevoked) {
+      throw new UnauthorizedException({
+        errorCode: AUTH_ERROR_CODES.SESSION_REVOKED,
+        message: 'Session has been revoked',
+      });
+    }
+
+    if (session.expiresAt < new Date()) {
+      throw new UnauthorizedException({
+        errorCode: AUTH_ERROR_CODES.SESSION_EXPIRED,
+        message: 'Session has expired',
+      });
+    }
+
+    // 4. Update session activity
+    session.lastActivityAt = new Date();
+    if (request?.ip) {
+      session.ipAddress = request.ip;
+    }
+    if (request?.userAgent) {
+      session.deviceName = this.extractDeviceName(request.userAgent);
+    }
+    await this.sessionRepository.save(session);
+
+    // 5. Generate new tokens
+    const accessToken = this.jwtService.sign(
+      { sub: payload.sub, email: payload.email },
+      { expiresIn: convertExpiry(TOKEN_CONFIG.ACCESS_TOKEN_EXPIRY) },
+    );
+
+    const newRefreshToken = this.jwtService.sign(
+      { sub: payload.sub, email: payload.email, sid: sessionId },
+      { expiresIn: convertExpiry(TOKEN_CONFIG.REFRESH_TOKEN_EXPIRY) },
+    );
+
+    return { accessToken, refreshToken: newRefreshToken };
   }
 
   private extractDeviceName(userAgent?: string): string {
